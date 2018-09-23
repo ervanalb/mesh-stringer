@@ -3,6 +3,12 @@ Turns a 3D mesh into tube lengths and a plan for how to string them together.
 
 ![rendered cube and cube made from straws](cube.jpg)
 
+## Dependencies
+
+* python3
+* numpy
+* numpy-stl
+
 ## Usage
 
 Give the program an STL file. It will give you a list of tubes to cut that correspond to edges in the STL. Cut out these tubes, and label them with a letter and an arrow to show which way to thread the string.

@@ -1,7 +1,7 @@
 # mesh-stringer
 Turns a 3D mesh into tube lengths and a plan for how to string them together.
 
-![rendered cube and cube made from straws]("cube.jpg")
+![rendered cube and cube made from straws](cube.jpg)
 
 ## Usage
 

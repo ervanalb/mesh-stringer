@@ -4,11 +4,14 @@ import stl
 import sys
 import numpy as np
 import textwrap
+import argparse
 
-fn = sys.argv[1]
-scale = 1
+parser = argparse.ArgumentParser(description="Calculates how to string tubes together to make objects")
+parser.add_argument("file", help="STL file to analyze")
+parser.add_argument("-s", "--scale", type=float, help="scale factor for the tube lengths", default=1)
+args = parser.parse_args()
 
-mesh = stl.mesh.Mesh.from_file(fn)
+mesh = stl.mesh.Mesh.from_file(args.file)
 
 # 1. Convert list of triangle coordinates to vertex coordinates + triangle indices
 #    (obj-style representation)
@@ -121,12 +124,12 @@ def number_to_letters(n):
         n //= 26
     return result
 
-print("Sticks:", len(unique_edges))
+print("Tubes:", len(unique_edges))
 for (i, edge) in enumerate(unique_edges):
     pt1 = vertices[edge[0]]
     pt2 = vertices[edge[1]]
     length = np.linalg.norm(pt2 - pt1)
-    print(number_to_letters(i), length * scale)
+    print(number_to_letters(i), length * args.scale)
 
 unique_edge_list = unique_edges.tolist()
 def get_unique_edge_index(e):
@@ -146,7 +149,7 @@ def to_letters(e):
     return number_to_letters(i) + ("'" if rev else "")
 
 print()
-print("Strings:", len(strings))
+print("Threading order:")
 for string in strings:
     output = " - ".join(to_letters(get_unique_edge_index(e)) for e in string)
     print(textwrap.fill(output, 34))

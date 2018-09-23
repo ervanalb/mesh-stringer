@@ -117,19 +117,31 @@ while unvisited:
 
 # 8. Print the output
 n_letters = int(np.ceil(np.log(len(unique_edges)) / np.log(26)))
+numbers_seen = {}
+next_number = 0
 def number_to_letters(n):
+    global next_number
+    if n not in numbers_seen:
+        numbers_seen[n] = next_number
+        n = next_number
+        next_number += 1
+    else:
+        n = numbers_seen[n]
     result = ""
     for i in range(n_letters):
         result = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[n % 26] + result
         n //= 26
     return result
 
-print("Tubes:", len(unique_edges))
-for (i, edge) in enumerate(unique_edges):
-    pt1 = vertices[edge[0]]
-    pt2 = vertices[edge[1]]
-    length = np.linalg.norm(pt2 - pt1)
-    print(number_to_letters(i), length * args.scale)
+numbers_reversed = {}
+def to_letters(e):
+    (i, rev) = e
+    if i not in numbers_reversed:
+        numbers_reversed[i] = rev
+        rev = False
+    else:
+        rev ^= numbers_reversed[i]
+    return number_to_letters(i) + ("'" if rev else "")
 
 unique_edge_list = unique_edges.tolist()
 def get_unique_edge_index(e):
@@ -144,13 +156,25 @@ def get_unique_edge_index(e):
     except ValueError as e:
         raise AssertionError("Could not find edge in unique edgelist") from e
 
-def to_letters(e):
-    (i, rev) = e
-    return number_to_letters(i) + ("'" if rev else "")
+# Calculate the stringing first, so that letters are sorted correctly
 
+stringing_text = [" - ".join(to_letters(get_unique_edge_index(e)) for e in string) for string in strings]
+
+def edge_length(edge):
+    pt1 = vertices[edge[0]]
+    pt2 = vertices[edge[1]]
+    length = np.linalg.norm(pt2 - pt1)
+    return length
+
+tubes = [(number_to_letters(i), edge_length(edge) * args.scale) for (i, edge) in enumerate(unique_edges)]
+tubes.sort(key=lambda x: x[0])
+
+print("Tubes:", len(unique_edges))
+for (n, l) in tubes:
+    print(n, l)
 print()
+
 print("Threading order:")
-for string in strings:
-    output = " - ".join(to_letters(get_unique_edge_index(e)) for e in string)
-    print(textwrap.fill(output, 34))
+for t in stringing_text:
+    print(textwrap.fill(t, 34))
     print()

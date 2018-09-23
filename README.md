@@ -41,3 +41,12 @@ R - P' - O - E' - B - J - E' - C -
 N - Q - M' - K - H' - A' - B - F'
 - G - I' - J - L' - M
 </pre>
+
+## How it works
+
+1. Naively thread each triangle separately. If you tried to build this, it would stay together but you would need 1 string per triangle.
+2. Create a graph of mesh faces and how they are connected. Two faces are connected if they share an edge.
+3. Calculate a spanning tree of this graph.
+4. Every time the spanning tree crosses an edge, introduce a twist/swap the two strings in that edge, combining them into a single string.
+
+The result is a single loop which threads every edge twice, and holds neighboring edges together as they meet at a vertex.

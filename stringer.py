@@ -21,8 +21,6 @@ points = mesh.vectors.reshape(3 * n_triangles, 3)
 (vertices, triangles) = np.unique(points, return_inverse=True, axis=0)
 triangles = triangles.reshape(n_triangles, 3)
 
-print("triangles", triangles)
-
 # 2. Ensure the mesh is closed by testing that every edge has two triangles
 #    wound in opposite directions
 
@@ -30,31 +28,23 @@ edges = np.hstack((triangles[:, 0:2],
                    triangles[:, 1:3],
                    triangles[:, 2:3], triangles[:,0:1])).reshape(n_triangles * 3, 2)
 
-print("edges", edges)
-
 edges_reversed = edges[:,::-1]
 (_, counts) = np.unique(np.vstack((edges, edges_reversed)), return_counts=True, axis=0)
 if not np.all(counts == 2):
     print("WARNING: Mesh is not closed. Output may be incorrect. Please repair mesh with netfabb.", file=sys.stderr)
-    print(f"Min strings in a tube: {np.min(counts)}", file=sys.stderr)
-    print(f"Max strings in a tube: {np.max(counts)}", file=sys.stderr)
 
 # 3. Create a linked list representation of a string threading
 #    that naively runs around each face.
 
-# This array is parallel to edges
-# for any given edge, its value points to the next edge
-# in the winding order
 winding_next = (3 * np.arange(n_triangles)).repeat(3) + np.tile(np.array([1, 2, 0]), n_triangles)
-
-print("winding next", winding_next)
 
 # 4. Create a graph of face connectivity
 
 edges_sorted = edges.copy()
 edges_sorted.sort(axis=1)
-(unique_edges, edge_indices, edge_counts) = np.unique(edges_sorted, return_inverse=True, return_counts=True, axis=0)
+(unique_edges, edge_indices) = np.unique(edges_sorted, return_inverse=True, axis=0)
 edge_indices = edge_indices.reshape(n_triangles, 3)
+#print(edge_indices)
 
 face_connections = {i: set() for i in range(n_triangles)}
 for i in range(n_triangles):
@@ -65,44 +55,27 @@ for i in range(n_triangles):
                 face_connections[i].add((j, e1, e2)) 
                 face_connections[j].add((i, e2, e1))
 
-# Function that, given a stringing order, calculates a cost function
-# based on work-in-progress
+# 5. Find a spanning tree of this graph using DFS
 
-def cost(winding_next, starting_edge):
-    edge = starting_edge
-    string = []
-    string.append(edge)
-    while True:
-        edge = winding_next[edge]
-        if edge == string[0]:
-            break
-        string.append(edge)
+#print(face_connections)
 
-    sum_running_wip_count = 0
-    #max_running_wip_count = 0
-    running_wip_count = 0
-    wip_counts = np.zeros(len(edges))
-    for edge in string:
-        unique_edge_index = edge_indices.ravel()[edge]
-        wip_counts[unique_edge_index] += 1
-        wip_count = wip_counts[unique_edge_index]
-        total_count = edge_counts[unique_edge_index]
+unvisited = set(face_connections)
+result = []
+while unvisited:
+    to_visit = [(None, None, next(iter(unvisited)), None)]
+    while to_visit:
+        (f1, e1, f2, e2) = to_visit.pop()
+        if f2 in unvisited:
+            if f1 is not None:
+                result.append((f1, e1, f2, e2))
+            unvisited.remove(f2)
+            for (nf, e1, e2) in face_connections[f2]:
+                #to_visit.append((f2, e1, nf, e2))  # DFS
+                to_visit.insert(0, (f2, e1, nf, e2))  # BFS
 
-        assert wip_count <= total_count
-        if wip_count == 1:
-            running_wip_count += 1 # Added a new tube
-        if wip_count == total_count:
-            running_wip_count -= 1 # Finished a tube
+# 6. Introduce a twist on every edge crossed in the spanning tree
 
-        #max_running_wip_count = max(max_running_wip_count, running_wip_count)
-        sum_running_wip_count += running_wip_count
-
-    #print("Max WIP count", max_running_wip_count)
-    return sum_running_wip_count
-
-def with_twist(winding_next, f1, e1, f2, e2):
-    winding_next = winding_next.copy()
-
+for (f1, e1, f2, e2) in result:
     i1 = f1 * 3 + e1
     i2 = f2 * 3 + e2
     assert np.all(edges_sorted[i1] == edges_sorted[i2]), "Tried to twist a non-shared edge"
@@ -117,9 +90,6 @@ def with_twist(winding_next, f1, e1, f2, e2):
             cur = winding_next[cur]
             if cur == start:
                 break
-
-        assert len(loop) == 3 # We should only ever add one triangle at a time
-
         edges[loop] = edges[loop,::-1]
         nexts = np.hstack((loop[-1:], loop[0:-1]))
         winding_next[loop] = nexts
@@ -129,103 +99,6 @@ def with_twist(winding_next, f1, e1, f2, e2):
     next2 = winding_next[i2]
     winding_next[i1] = next2
     winding_next[i2] = next1
-
-    return winding_next
-
-# Mark all faces as unvisited
-visited = set()
-
-# Visit the first one
-starting_edge = 0
-starting_face = 0
-visited.add(starting_face)
-
-def route_n_triangles(winding_next, visited, n):
-    if n == 0 or len(visited) == n_triangles:
-        return winding_next, visited
-
-    # Enumerate all possible next twists
-    # We can introduce a twist anywhere there is a visited face adjacent to an unvisited face
-    twist_candidates = set()
-    for f1 in visited:
-        for (f2, e1, e2) in face_connections[f1]:
-            if f2 not in visited:
-                twist_candidates.add((f1, f2, e1, e2))
-
-    def try_twist_return_cost(winding_next, f1, e1, f2, e2):
-        try_winding_next = with_twist(winding_next, f1, e1, f2, e2)
-        try_visited = visited | {f2}
-        (try_routing, _) = route_n_triangles(try_winding_next, try_visited, n - 1)
-        return cost(try_routing, 0)
-
-    twist_costs = (((f1, f2, e1, e2), try_twist_return_cost(winding_next, f1, e1, f2, e2)) for (f1, f2, e1, e2) in twist_candidates)
-    ((f1, f2, e1, e2), c) = min(twist_costs, key=lambda x: x[1])
-
-    return (with_twist(winding_next, f1, e1, f2, e2), visited | {f2})
-
-GREEDY_LOOKAHEAD = 5
-
-while len(visited) < n_triangles:
-    # Enumerate all possible next twists
-    # We can introduce a twist anywhere there is a visited face adjacent to an unvisited face
-
-    (winding_next, visited) = route_n_triangles(winding_next, visited, GREEDY_LOOKAHEAD)
-
-    print(len(visited), "/", n_triangles)
-
-print("COST:", cost(winding_next, 0))
-
-print("Done!")
-
-print(face_connections)
-
-#strategy = "dfs"
-#unvisited = set(face_connections)
-#result = []
-#while unvisited:
-#    to_visit = [(None, None, next(iter(unvisited)), None)]
-#    while to_visit:
-#        (f1, e1, f2, e2) = to_visit.pop()
-#        if f2 in unvisited:
-#            if f1 is not None:
-#                result.append((f1, e1, f2, e2))
-#            unvisited.remove(f2)
-#            for (nf, e1, e2) in face_connections[f2]:
-#                if strategy == "dfs":
-#                    to_visit.append((f2, e1, nf, e2))
-#                elif strategy == "bfs":
-#                    to_visit.insert(0, (f2, e1, nf, e2))
-#                else:
-#                    raise ValueError(f"Unknown strategy: {strategy}")
-#
-## 6. Introduce a twist on every edge crossed in the spanning tree
-#
-#for (f1, e1, f2, e2) in result:
-#    i1 = f1 * 3 + e1
-#    i2 = f2 * 3 + e2
-#    assert np.all(edges_sorted[i1] == edges_sorted[i2]), "Tried to twist a non-shared edge"
-#
-#    if not np.all(edges[i1] == edges[i2]):
-#        # We need to reverse the linked list of i2
-#        loop = []
-#        start = i2
-#        cur = start
-#        while True:
-#            loop.append(cur)
-#            cur = winding_next[cur]
-#            if cur == start:
-#                break
-#        edges[loop] = edges[loop,::-1]
-#        nexts = np.hstack((loop[-1:], loop[0:-1]))
-#        winding_next[loop] = nexts
-#
-#    # Twist the linked list
-#    next1 = winding_next[i1]
-#    next2 = winding_next[i2]
-#    winding_next[i1] = next2
-#    winding_next[i2] = next1
-#
-#print("COST OF", strategy, ":", cost(winding_next, 0))
 
 # 7. Walk the linked list
 unvisited = set(np.arange(len(edges)))
@@ -285,28 +158,24 @@ def get_unique_edge_index(e):
         raise AssertionError("Could not find edge in unique edgelist") from e
 
 # Calculate the stringing first, so that letters are sorted correctly
+
+stringing_text = [" - ".join(to_letters(get_unique_edge_index(e)) for e in string) for string in strings]
+
 def edge_length(edge):
     pt1 = vertices[edge[0]]
     pt2 = vertices[edge[1]]
     length = np.linalg.norm(pt2 - pt1)
     return length
 
-stringing_text = [" - ".join(to_letters(get_unique_edge_index(e)) for e in string) for string in strings]
-string_length = [sum(edge_length(edges[e]) * args.scale for e in string) for string in strings]
-
 tubes = [(number_to_letters(i), edge_length(edge) * args.scale) for (i, edge) in enumerate(unique_edges)]
 tubes.sort(key=lambda x: x[0])
 
-print("Tube count:", len(unique_edges))
-print("Shortest:", min(l for (_, l) in tubes))
-print("Longest:", max(l for (_, l) in tubes))
-for (n, l) in sorted(tubes, key=lambda x: -x[1]):
+print("Tubes:", len(unique_edges))
+for (n, l) in tubes:
     print(n, l)
-print("Total length of tubes:", sum(l for (_, l) in tubes))
 print()
 
 print("Threading order:")
-for text, length in zip(stringing_text, string_length):
-    print("Length of string:", length)
-    print(textwrap.fill(text, 34))
+for t in stringing_text:
+    print(textwrap.fill(t, 34))
     print()
